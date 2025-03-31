@@ -56,6 +56,7 @@ async def serve(
     profiles: Optional[list] = None,
     system_properties: Optional[dict] = None,
     additional_args: Optional[list] = None,
+    offline: bool = False,
     executor: Optional[Executor] = None,
 ) -> None:
     """Run the maven server.
@@ -75,6 +76,7 @@ async def serve(
         profiles=profiles,
         system_properties=system_properties,
         additional_args=additional_args,
+        offline=offline,
     )
     executor = executor or ThreadPoolExecutor(max_workers=4)
     executor = executor or ThreadPoolExecutor(max_workers=4)
@@ -104,7 +106,6 @@ async def serve(
         await server.run(read_stream, write_stream, options, raise_exceptions=True)
 
 
-
 class MavenCommand:
     def __init__(
         self,
@@ -115,6 +116,7 @@ class MavenCommand:
         profiles: Optional[list] = None,
         system_properties: Optional[dict] = None,
         additional_args: Optional[list] = None,
+        offline: bool = False,
     ):
         """
         初始化 Maven 命令执行器
@@ -125,9 +127,10 @@ class MavenCommand:
             mvn_command: Maven 命令路径，默认为 "mvn"
             settings_file: Maven 设置文件路径，例如 "~/.m2/jd-settings.xml"
             profiles: Maven 配置文件列表，例如 ["jdRepository", "!common-Repository"]
-            system_properties: Maven 系统属性字典，例如 
+            system_properties: Maven 系统属性字典，例如
                 {"maven.wagon.http.ssl.insecure": "true"}
             additional_args: 其他额外的 Maven 命令行参数
+            offline: 是否启用 Maven 离线模式
         """
         self.root_dir = root_dir
         self.mvn = mvn_command or "mvn"
@@ -135,7 +138,7 @@ class MavenCommand:
         self.profiles = profiles or []
         self.system_properties = system_properties or {}
         self.additional_args = additional_args or []
-
+        self.offline = offline
         if java_home:
             os.environ["JAVA_HOME"] = java_home
 
@@ -152,6 +155,9 @@ class MavenCommand:
             profiles_str = ",".join(self.profiles)
             command.extend(["-P", profiles_str])
 
+        # 添加离线模式
+        if self.offline:
+            command.append("--offline")
         # 添加系统属性
         for key, value in self.system_properties.items():
             command.append(f"-D{key}={value}")

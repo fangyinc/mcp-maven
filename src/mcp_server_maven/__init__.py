@@ -47,6 +47,12 @@ def main():
         default=None,
         help='JSON format list of additional Maven arguments (e.g. \'["-X", "-U"]\').',
     )
+    parser.add_argument(
+        "-o",
+        "--offline",
+        action="store_true",
+        help="Run Maven in offline mode (no network access).",
+    )
     # Last is the root directory
     parser.add_argument(
         "root_dir",
@@ -93,6 +99,7 @@ def main():
             profiles=profiles,
             system_properties=system_properties,
             additional_args=additional_args,
+            offline=args.offline,
         )
     )
 
