@@ -39,3 +39,5 @@ async def blocking_func_to_async(
 
     def run_with_context():
         return ctx.run(partial(func, *args, **kwargs))
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, run_with_context)

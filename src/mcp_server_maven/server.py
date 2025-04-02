@@ -79,7 +79,6 @@ async def serve(
         offline=offline,
     )
     executor = executor or ThreadPoolExecutor(max_workers=4)
-    executor = executor or ThreadPoolExecutor(max_workers=4)
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
