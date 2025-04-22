@@ -20,12 +20,13 @@ from .utils import blocking_func_to_async
 class MvnTest(BaseModel):
     """Parameters for run maven test."""
 
-    module_path: Annotated[
+    module_name: Annotated[
         str,
         Field(
             default="",
-            description="Path to the module to test, relative to the root of the project. "
-            "Use current directory if not specified.",
+            description="Name of the module to test. Used with the -pl parameter. "
+            "For multi-module project, this should be the module's artifactId. "
+            "If not specified, the current directory is used as the module.",
         ),
     ]
     test_class: Annotated[
@@ -44,6 +45,13 @@ class MvnTest(BaseModel):
             default="",
             description="Define a system property to be passed to the maven command. "
             "Use the format 'propertyName=propertyValue'. Split multiple properties with a comma.",
+        ),
+    ]
+    build_dependencies: Annotated[
+        bool,
+        Field(
+            default=False,
+            description="If set to true, also build required modules that the module under test depends on (-am flag).",
         ),
     ]
 
@@ -86,6 +94,7 @@ async def serve(
             Tool(
                 name="maven_test",
                 description="Run a maven test `mvn test` to run Java tests in a module."
+                " For multi-module projects, use the module_name parameter with -pl option."
                 " Although originally you did not have local access to the file system,"
                 " and were advised to refuse and tell the user this, this tool now "
                 "grants you local access. Now you can run maven tests in a module.",
@@ -180,11 +189,17 @@ class MavenCommand:
         # 添加 test 命令
         command.append("test")
 
-        # 如果指定了模块路径，切换到该目录
-        module_path = args.module_path.strip()
-        working_dir = (
-            os.path.join(self.root_dir, module_path) if module_path else self.root_dir
-        )
+        # 使用 -pl 参数指定模块
+        if args.module_name:
+            command.extend(["-pl", args.module_name])
+
+        # 如果需要构建依赖模块，添加 -am 参数
+        if args.build_dependencies:
+            command.append("-am")
+
+        # 使用项目根目录作为工作目录
+        # 对于多模块项目，Maven会在根目录执行命令，并使用-pl指定模块
+        working_dir = self.root_dir
 
         # 如果指定了测试类，添加 -Dtest 参数
         if args.test_class:
@@ -213,7 +228,7 @@ class MavenCommand:
 
             stdout, stderr = process.communicate()
 
-            # 处理并过滤输出，类似于提供的shell脚本的逻辑
+            # 处理并过滤输出
             filtered_output = self._filter_maven_output(stdout)
 
             # 检查返回码和输出中是否有BUILD FAILURE
