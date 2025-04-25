@@ -1,6 +1,6 @@
 [project]
 name = "mcp-server-maven"
-version = "0.1.1"
+version = "0.1.2"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,7 +21,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-dev-dependencies = ["pyright>=1.1.389", "ruff>=0.7.3"]
+dev-dependencies = [
+    "pyright>=1.1.389",
+    "pytest>=8.3.5",
+    "ruff>=0.7.3",
+]
 
 [tool.ruff]
 line-length = 88

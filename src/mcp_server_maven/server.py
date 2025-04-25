@@ -166,6 +166,8 @@ class MavenCommand:
         # 添加离线模式
         if self.offline:
             command.append("--offline")
+            
+        command.append("--quiet")
         # 添加系统属性
         for key, value in self.system_properties.items():
             command.append(f"-D{key}={value}")
@@ -188,7 +190,15 @@ class MavenCommand:
 
         # 添加 test 命令
         command.append("test")
-
+        
+        # 使用 -Dorg.slf4j.simpleLogger.defaultLogLevel=error 来减少日志输出
+        command.append("-Dorg.slf4j.simpleLogger.defaultLogLevel=error")
+        
+        # 添加 -Dlog4j.configurationFile=NONE 禁用 log4j 配置
+        command.append("-Dlog4j.configurationFile=NONE")
+        
+        # 禁用 ANT 任务的详细输出
+        command.append("-Dorg.apache.tools.ant.taskdefs.optional.junit.OutputTestListener.pending=false")
         # 使用 -pl 参数指定模块
         if args.module_name:
             command.extend(["-pl", args.module_name])
@@ -226,15 +236,18 @@ class MavenCommand:
                 encoding="utf-8",
             )
 
-            stdout, stderr = process.communicate()
+            stdout, _ = process.communicate()
 
-            # 处理并过滤输出
-            filtered_output = self._filter_maven_output(stdout)
+            # 处理并过滤输出，类似于提供的shell脚本的逻辑
+            filtered_output = extract_important_maven_output(stdout)
 
             # 检查返回码和输出中是否有BUILD FAILURE
             if process.returncode != 0 or "BUILD FAILURE" in stdout:
                 # 测试失败
                 error_detail = filtered_output
+                # 如果过滤后没有内容，至少提供基本的失败信息
+                if not error_detail.strip():
+                    error_detail = f"Maven test failed with exit code {process.returncode}.\nCommand: {' '.join(command)}"
                 return [
                     TextContent(
                         type="text", text=f"<e>Test failed:\n\n{error_detail}</e>"
@@ -244,8 +257,10 @@ class MavenCommand:
                 # 测试成功
                 result = "Maven test executed successfully:\n\n"
                 result += f"Command: {' '.join(command)}\n"
+                f
                 result += f"Working directory: {working_dir}\n\n"
-                result += filtered_output
+                if filtered_output.strip():
+                    result += filtered_output
                 return [TextContent(type="text", text=result)]
 
         except Exception as e:
@@ -255,78 +270,76 @@ class MavenCommand:
                     type="text", text=f"<e>Failed to execute maven test: {str(e)}</e>"
                 )
             ]
-
-    def _filter_maven_output(self, output):
-        """
-        过滤Maven输出，保留有用的信息，类似于提供的shell脚本中的AWK过滤逻辑
-        """
-        # 存储过滤后的输出行
-        filtered_lines = []
-
-        # 标记当前是否处于Failed tests部分
-        in_failed_section = False
-
-        # 堆栈计数器
-        stack_count = 0
-
-        # 按行处理输出
-        for line in output.splitlines():
-            # 匹配成功或失败的构建状态
-            if "BUILD SUCCESS" in line or "BUILD FAILURE" in line:
-                filtered_lines.append(line)
-                continue
-
-            # 匹配测试结果摘要
-            if "Tests run:" in line and ("Failures:" in line or "Errors:" in line):
-                filtered_lines.append(line)
-                continue
-
-            # 匹配失败的测试用例
-            if "Failed tests:" in line:
-                filtered_lines.append(line)
-                in_failed_section = True
-                continue
-
-            # 捕获断言错误信息
-            if "AssertionError" in line or "expected" in line:
-                filtered_lines.append(line)
-                continue
-
-            # 匹配堆栈错误的起始行
-            match = re.search(r"at .+\.java:[0-9]+", line)
-            if match and stack_count < 1:
-                filtered_lines.append(line)
-                stack_count += 1
-                continue
-
-            # 继续打印"Failed tests:"部分的内容
-            if in_failed_section and line.startswith("  "):
-                filtered_lines.append(line)
-                continue
-
-            # 结束"Failed tests:"部分
-            if in_failed_section and line.strip() == "":
-                in_failed_section = False
-
-            # 重置堆栈计数器
-            if line.strip() == "":
-                stack_count = 0
-
-            # 匹配运行时间信息
-            if "Total time:" in line:
-                filtered_lines.append(line)
-                continue
-
-            # 匹配需要关注的错误信息
-            if "[ERROR]" in line and not any(
-                skip in line
-                for skip in [
-                    "To see the full stack trace",
-                    "Re-run Maven",
-                    "For more information",
-                ]
-            ):
-                filtered_lines.append(line)
-                continue
-
-        return "\n".join(filtered_lines)
+            
+def extract_important_maven_output(output):
+    """
+    提取 Maven 输出中的重要信息，过滤掉不必要的日志
+    如果输出少于200行，直接返回全部内容
+    否则只对最后1000行应用过滤逻辑
+    """
+    # 分割输出为行
+    output_lines = output.splitlines()
+    
+    # 如果输出少于200行，直接返回全部内容
+    if len(output_lines) <= 200:
+        return output
+    
+    # 如果输出很长，只处理最后1000行
+    if len(output_lines) > 1000:
+        lines_to_process = output_lines[-1000:]
+    else:
+        lines_to_process = output_lines
+    
+    # 存储过滤后的输出行
+    important_lines = []
+    
+    # Maven 核心相关的关键词
+    maven_keywords = [
+        "BUILD ", "Tests run:", "Failed tests:", "Errors:", "Results :",
+        "[ERROR]", "[WARNING]", "[INFO] BUILD", "[INFO] Total time:", 
+        "[INFO] Finished at:", "[INFO] Final Memory:", "Failures:", 
+        "There are test failures", "Caused by:", "Exception in thread",
+        "java.lang.AssertionError", "expected", "Compilation failure",
+        "COMPILATION ERROR", "T E S T S"
+    ]
+    
+    # 错误相关堆栈行的识别模式
+    stack_pattern = re.compile(r"at [\w$.]+\([\w$.]+\.(java|groovy|kt|scala):\d+\)")
+    
+    # 追踪错误上下文的标志
+    in_error_context = False
+    context_lines = 0
+    
+    for line in lines_to_process:
+        # 检查是否包含 Maven 关键词
+        if any(keyword in line for keyword in maven_keywords):
+            important_lines.append(line)
+            in_error_context = True
+            context_lines = 5  # 保留接下来的5行作为上下文
+            continue
+            
+        # 检查是否是堆栈跟踪
+        if stack_pattern.search(line):
+            important_lines.append(line)
+            in_error_context = True
+            context_lines = 3
+            continue
+            
+        # 保留错误上下文
+        if in_error_context and context_lines > 0:
+            important_lines.append(line)
+            context_lines -= 1
+            if context_lines == 0:
+                in_error_context = False
+    
+    # 如果没有找到重要信息，返回一个有用的摘要和指示信息
+    if not important_lines:
+        return (
+            f"Maven output was {len(output_lines)} lines. No detailed error information found in the last 1000 lines.\n"
+            "Output may have been truncated. Consider running with more verbose options if needed."
+        )
+    
+    # 添加一个说明，表明这是过滤后的输出
+    header = f"Original output was {len(output_lines)} lines. Showing filtered important information:\n{'-' * 80}\n"
+    
+    return header + "\n".join(important_lines)
